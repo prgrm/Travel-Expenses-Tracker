@@ -1,5 +1,6 @@
 'use strict';
 const CATS=['food','transport','hotel','fun','motorbike','hygiene','massage','care','other'];
+const ICON={food:'🍔',transport:'🚌',hotel:'🏨',fun:'🎉',motorbike:'🏍️',hygiene:'🧼',massage:'💆',care:'🩹',other:'📦'};
 const $=s=>document.querySelector(s),pad=n=>String(n).padStart(2,'0');
 const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const parse=s=>{const[a,b,c]=s.split('-').map(Number);return new Date(a,b-1,c)};
@@ -20,14 +21,14 @@ function vAdd(){
  for(const e of D.slice().sort((a,b)=>b.ts-a.ts)){if(e.cat===S.cat&&e.note&&!sug.includes(e.note)){sug.push(e.note);if(sug.length==5)break}}
  const lbl=parse(S.date).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'})+(S.date==today()?' (today)':'');
  return `<div class="row dn"><button data-a="d" data-n="-1">‹</button><div class="dl" data-a="now">${lbl}</div><button data-a="d" data-n="1">›</button></div>
-<div class="cats">${CATS.map(c=>`<button class="${c==S.cat?'on':''}" data-a="c" data-c="${c}">${c}</button>`).join('')}</div>
+<div class="cats">${CATS.map(c=>`<button class="${c==S.cat?'on':''}" data-a="c" data-c="${c}"><i>${ICON[c]}</i>${c}</button>`).join('')}</div>
 <div class="card"><div class="row amt"><button data-a="a" data-n="-50">−</button><input id="amt" type="number" inputmode="decimal" min="0" step="any" placeholder="Amount" value="${esc(S.amt)}"><button data-a="a" data-n="50">+</button></div>
 <input id="note" type="text" placeholder="Comment" value="${esc(S.note)}">
 <div class="chips">${sug.map(s=>`<button data-a="s" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div>
 <button class="pri" data-a="save">${S.edit?'Save changes':'Add expense'}</button>
 ${S.edit?'<div class="row" style="margin-top:8px"><button class="dg" data-a="del">Delete</button><button data-a="cancel">Cancel</button></div>':''}</div>
 <h3>Spent this day: ${m(tot)}</h3>
-${day.map(e=>`<div class="item" data-a="ed" data-id="${e.id}"><b>${e.cat}</b><span>${esc(e.note)}</span><em>${n(e.amt)}</em></div>`).join('')||'<p class="mu">Nothing recorded for this day. Pick a category and enter an amount.</p>'}`;
+${day.map(e=>`<div class="item" data-a="ed" data-id="${e.id}"><b>${ICON[e.cat]||''} ${e.cat}</b><span>${esc(e.note)}</span><em>${n(e.amt)}</em></div>`).join('')||'<p class="mu">Nothing recorded for this day. Pick a category and enter an amount.</p>'}`;
 }
 
 function vTot(){
@@ -37,7 +38,7 @@ function vTot(){
  const lab=k=>wk?f(parse(k))+' to '+f(parse(addDays(k,6)))+' '+parse(addDays(k,6)).getFullYear():new Date(+k.slice(0,4),+k.slice(5)-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'});
  const keys=Object.keys(g).sort().reverse();
  return `<div class="seg"><button class="${wk?'on':''}" data-a="tm" data-v="w">Weeks</button><button class="${wk?'':'on'}" data-a="tm" data-v="m">Months</button></div>`+
- (keys.map(k=>`<div class="card"><div class="row"><b>${lab(k)}</b><b>${m(g[k].t)}</b></div><div class="mu">${CATS.filter(c=>g[k].c[c]).map(c=>c+' '+n(g[k].c[c])).join(', ')}</div></div>`).join('')||'<p class="mu">No expenses yet.</p>');
+ (keys.map(k=>`<div class="card"${wk?` data-a="go" data-d="${k}"`:''}><div class="row"><b>${lab(k)}</b><b>${m(g[k].t)}${wk?' ›':''}</b></div><div class="mu">${CATS.filter(c=>g[k].c[c]).map(c=>ICON[c]+' '+c+' '+n(g[k].c[c])).join(', ')}</div></div>`).join('')||'<p class="mu">No expenses yet.</p>');
 }
 
 function vYear(){
@@ -60,7 +61,7 @@ function vData(){
  return `<div class="card"><label for="cur">Currency label, shown after totals</label><input id="cur" value="${esc(CUR)}" placeholder="For example THB"></div>
 <div class="card"><button class="pri" style="margin:0" data-a="exj">Export backup file</button>
 <button class="pri" data-a="exc">Export CSV for Excel</button>
-<button class="pri" data-a="imp">Import backup file</button><input id="imp" type="file" accept=".json,application/json" hidden>
+<button class="pri" data-a="imp">Import backup or CSV file</button><input id="imp" type="file" hidden>
 <p class="mu">${D.length} expenses are stored on this phone. Importing adds expenses that are not already here.</p></div>`;
 }
 
@@ -107,15 +108,51 @@ document.addEventListener('input',e=>{const i=e.target.id;
  if(i=='amt')S.amt=e.target.value;else if(i=='note')S.note=e.target.value;
  else if(i=='cur'){CUR=e.target.value.trim();ls.set('tet.cur',CUR)}});
 
+function parseCsv(t,dl){
+ const R=[];let r=[],f='',q=false;
+ for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+  else if(c=='"')q=true;
+  else if(c==dl){r.push(f);f=''}
+  else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;r.push(f);R.push(r);r=[];f=''}
+  else f+=c}
+ if(f||r.length){r.push(f);R.push(r)}
+ return R.filter(r=>r.some(x=>x.trim()));
+}
+
+function impJson(j){
+ const a=Array.isArray(j)?j:j.data,ids=new Set(D.map(x=>x.id));let c=0;
+ for(const x of a){if(!x||!/^\d{4}-\d{2}-\d{2}$/.test(x.date)||!(Number(x.amt)>0)||!x.id||ids.has(x.id))continue;
+  D.push({id:String(x.id),date:x.date,cat:CATS.includes(x.cat)?x.cat:'other',amt:Number(x.amt),note:String(x.note||''),ts:Number(x.ts)||0});ids.add(x.id);c++}
+ if(!CUR&&j.cur){CUR=String(j.cur);ls.set('tet.cur',CUR)}
+ return c+' expenses imported from the backup';
+}
+
+function impCsv(t){
+ const first=t.split(/\r?\n/)[0],dl=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';
+ const R=parseCsv(t,dl);if(!R.length)return 'No rows found in that file';
+ const h=R[0].map(x=>x.trim().toLowerCase()),hasH=h.some(x=>/date/.test(x)),ix=k=>hasH?h.findIndex(x=>k.test(x)):-1;
+ const ci=[ix(/date/),ix(/cat/),ix(/amount|amt|cost|price|total/),ix(/comment|note|desc/)].map((v,i)=>v<0?i:v);
+ if(hasH)R.shift();
+ const key=(d,c,a,x)=>[d,c,a,x].join('|'),have={};
+ for(const x of D){const k=key(x.date,x.cat,x.amt,x.note);have[k]=(have[k]||0)+1}
+ let add=0,dup=0,bad=0;const base=Date.now();
+ for(const r of R){
+  const dm=(r[ci[0]]||'').trim().match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/),raw=(r[ci[2]]||'').replace(/\s/g,''),
+   amt=Number(dl==';'?raw.replace(',','.'):raw.replace(/,/g,''));
+  if(!dm||!(amt>0)||new Date(+dm[1],+dm[2]-1,+dm[3]).getMonth()!=+dm[2]-1){bad++;continue}
+  const date=dm[1]+'-'+pad(+dm[2])+'-'+pad(+dm[3]),cl=(r[ci[1]]||'').trim().toLowerCase(),cat=CATS.includes(cl)?cl:'other',note=(r[ci[3]]||'').trim(),k=key(date,cat,amt,note);
+  if(have[k]>0){have[k]--;dup++;continue}
+  D.push({id:(base+add).toString(36)+Math.random().toString(36).slice(2,6),date,cat,amt,note,ts:parse(date).getTime()+add});add++}
+ return add+' imported, '+dup+' already here, '+bad+' skipped (bad date or amount)';
+}
+
 document.addEventListener('change',e=>{
  if(e.target.id!='imp'||!e.target.files[0])return;
- const f=e.target.files[0],r=new FileReader();
- r.onload=()=>{try{const j=JSON.parse(r.result),a=Array.isArray(j)?j:j.data,ids=new Set(D.map(x=>x.id));let c=0;
-  for(const x of a){if(!x||!/^\d{4}-\d{2}-\d{2}$/.test(x.date)||!(Number(x.amt)>0)||!x.id||ids.has(x.id))continue;
-   D.push({id:String(x.id),date:x.date,cat:CATS.includes(x.cat)?x.cat:'other',amt:Number(x.amt),note:String(x.note||''),ts:Number(x.ts)||0});ids.add(x.id);c++}
-  if(!CUR&&j.cur){CUR=String(j.cur);ls.set('tet.cur',CUR)}
-  persist();alert(c+' expenses imported');render()}catch(err){alert('That file could not be read as a backup')}};
- r.readAsText(f);e.target.value='';
+ const r=new FileReader();
+ r.onload=()=>{try{const t=String(r.result).replace(/^\ufeff/,''),res=/^\s*[\[{]/.test(t)?impJson(JSON.parse(t)):impCsv(t);
+  persist();render();alert(res)}catch(err){alert('That file could not be read as a backup or CSV file')}};
+ r.readAsText(e.target.files[0]);e.target.value='';
 });
 
 render();
