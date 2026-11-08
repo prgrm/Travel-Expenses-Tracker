@@ -1,5 +1,5 @@
 'use strict';
-const CATS=['food','transport','hotel','fun','motorbike','other'];
+const CATS=['food','transport','hotel','fun','motorbike','hygiene','massage','care','other'];
 const $=s=>document.querySelector(s),pad=n=>String(n).padStart(2,'0');
 const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const parse=s=>{const[a,b,c]=s.split('-').map(Number);return new Date(a,b-1,c)};
