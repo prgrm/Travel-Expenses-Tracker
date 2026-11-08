@@ -23,6 +23,8 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+      - name: Install app icons
+        run: cp -r icon-res/res/. android/app/src/main/res/
       - name: Use the fixed signing key
         run: mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
       - name: Build APK
