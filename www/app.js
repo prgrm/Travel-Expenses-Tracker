@@ -10,8 +10,8 @@ const today=()=>fmt(new Date());
 const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
 const n=x=>(Math.round(x*100)/100).toLocaleString(undefined,{maximumFractionDigits:2});
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-let D=ls.get('tet.data',[]),CUR=ls.get('tet.cur','');
-const persist=()=>ls.set('tet.data',D);
+let D=ls.get('tet.data',[]),CUR=ls.get('tet.cur',''),T=ls.get('tet.del',{}),SID=ls.get('tet.sid',''),SA=ls.get('tet.sa',''),SS=ls.get('tet.last','');
+const persist=()=>{ls.set('tet.data',D);ls.set('tet.del',T)};
 const m=x=>n(x)+(CUR?' '+CUR:'');
 const S={tab:'add',date:today(),cat:'food',amt:'',note:'',edit:null,tm:'w',yr:new Date().getFullYear(),ym:null};
 const reset=()=>{S.edit=null;S.amt='';S.note=''};
@@ -58,11 +58,17 @@ function vYear(){
 }
 
 function vData(){
+ const em=(()=>{try{return JSON.parse(SA).client_email}catch(e){return''}})();
  return `<div class="card"><label for="cur">Currency label, shown after totals</label><input id="cur" value="${esc(CUR)}" placeholder="For example THB"></div>
 <div class="card"><button class="pri" style="margin:0" data-a="exj">Export backup file</button>
 <button class="pri" data-a="exc">Export CSV for Excel</button>
 <button class="pri" data-a="imp">Import backup or CSV file</button><input id="imp" type="file" hidden>
-<p class="mu">${D.length} expenses are stored on this phone. Importing adds expenses that are not already here.</p></div>`;
+<p class="mu">${D.length} expenses are stored on this phone. Importing adds expenses that are not already here.</p></div>
+<div class="card"><b>Google Sheet sync</b>
+<label for="sid">Sheet ID or sheet link</label><input id="sid" value="${esc(SID)}" placeholder="Paste the sheet ID">
+<label for="sak">Service account key (paste the whole JSON file)</label><textarea id="sak" rows="3" placeholder="${em?'Key saved. Paste again to replace it.':'Paste the key file contents'}"></textarea>
+${em?`<p class="mu">Share the sheet with ${esc(em)} as Editor.</p>`:''}
+<button class="pri" data-a="sync">Sync now</button><p class="mu" id="ss">${esc(SS)}</p></div>`;
 }
 
 async function out(name,text,mime){
@@ -85,6 +91,7 @@ document.addEventListener('click',e=>{
  if(a=='exc'){const rows=D.slice().sort((x,y)=>x.date<y.date?-1:x.date>y.date?1:x.ts-y.ts).map(x=>[x.date,x.cat,x.amt,'"'+x.note.replace(/"/g,'""')+'"'].join(','));
   return out('travel-expenses-'+today()+'.csv','\ufeffdate,category,amount,comment\n'+rows.join('\n'),'text/csv')}
  if(a=='imp')return $('#imp').click();
+ if(a=='sync')return runSync();
  if(a=='t'){S.tab=d.t;S.ym=null;S.yr=parse(S.date).getFullYear()}
  else if(a=='d'){if(S.edit)reset();S.date=addDays(S.date,Number(d.n))}
  else if(a=='now'){if(S.edit)reset();S.date=today()}
@@ -93,7 +100,7 @@ document.addEventListener('click',e=>{
   const r={date:S.date,cat:S.cat,amt:v,note:S.note.trim(),ts:Date.now()},x=S.edit&&D.find(z=>z.id==S.edit);
   if(x)Object.assign(x,r);else D.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),...r});
   persist();reset()}
- else if(a=='del'){if(!confirm('Delete this expense?'))return;D=D.filter(x=>x.id!=S.edit);persist();reset()}
+ else if(a=='del'){if(!confirm('Delete this expense?'))return;T[S.edit]=Date.now();D=D.filter(x=>x.id!=S.edit);persist();reset()}
  else if(a=='cancel')reset();
  else if(a=='ed'){const x=D.find(z=>z.id==d.id);if(!x)return;Object.assign(S,{edit:x.id,date:x.date,cat:x.cat,amt:String(x.amt),note:x.note});scrollTo(0,0)}
  else if(a=='tm')S.tm=d.v;
@@ -106,7 +113,9 @@ document.addEventListener('click',e=>{
 
 document.addEventListener('input',e=>{const i=e.target.id;
  if(i=='amt')S.amt=e.target.value;else if(i=='note')S.note=e.target.value;
- else if(i=='cur'){CUR=e.target.value.trim();ls.set('tet.cur',CUR)}});
+ else if(i=='cur'){CUR=e.target.value.trim();ls.set('tet.cur',CUR)}
+ else if(i=='sid'){SID=((e.target.value.match(/\/d\/([\w-]+)/)||[])[1]||e.target.value).trim();ls.set('tet.sid',SID)}
+ else if(i=='sak'){try{const k=JSON.parse(e.target.value);if(k.client_email&&k.private_key){SA=e.target.value;ls.set('tet.sa',SA);e.target.value='';render()}}catch(err){}}});
 
 function parseCsv(t,dl){
  const R=[];let r=[],f='',q=false;
@@ -155,4 +164,64 @@ document.addEventListener('change',e=>{
  r.readAsText(e.target.files[0]);e.target.value='';
 });
 
-render();
+const b64u=s=>btoa(s).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+async function token(){
+ const k=JSON.parse(SA),t=Math.floor(Date.now()/1000);
+ const u=b64u(JSON.stringify({alg:'RS256',typ:'JWT'}))+'.'+b64u(JSON.stringify({iss:k.client_email,scope:'https://www.googleapis.com/auth/spreadsheets',aud:'https://oauth2.googleapis.com/token',iat:t,exp:t+3600}));
+ const der=Uint8Array.from(atob(k.private_key.replace(/-----[^-]+-----|\s/g,'')),c=>c.charCodeAt(0));
+ const key=await crypto.subtle.importKey('pkcs8',der,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);
+ const sig=new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5',key,new TextEncoder().encode(u)));
+ const r=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type='+encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')+'&assertion='+u+'.'+b64u(String.fromCharCode(...sig))});
+ const j=await r.json();if(!j.access_token)throw new Error(j.error_description||j.error||'No token');return j.access_token;
+}
+async function api(tok,path,method,body){
+ const r=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+SID+path,{method:method||'GET',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok)throw Object.assign(new Error((j.error&&j.error.message)||('HTTP '+r.status)),{code:r.status});
+ return j;
+}
+const same=(a,b)=>a.del==b.del&&(a.del||(a.date==b.date&&a.cat==b.cat&&a.amt==b.amt&&a.note==b.note));
+async function sync(){
+ const tok=await token(),rg=a=>'/values/'+encodeURIComponent('Expenses!'+a);
+ let rows;
+ try{rows=(await api(tok,rg('A1:G')+'?valueRenderOption=UNFORMATTED_VALUE')).values||[]}
+ catch(e){if(e.code!=400)throw e;await api(tok,':batchUpdate','POST',{requests:[{addSheet:{properties:{title:'Expenses'}}}]});rows=[]}
+ const R={},junk=[],now=Date.now();
+ for(const r of rows.slice(1)){
+  const [id,dt,cl,am,nt,ts,dl]=r,amt=Number(am),
+   date=typeof dt=='number'?new Date(Math.round((dt-25569)*864e5)).toISOString().slice(0,10):String(dt||'').trim().slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!(amt>0)){if(r.some(x=>x!==''&&x!=null))junk.push(r);continue}
+  const c=String(cl||'').trim().toLowerCase(),k=id?String(id):uid();
+  R[k]={id:k,date,cat:CATS.includes(c)?c:'other',amt,note:String(nt||''),ts:id?Number(ts)||0:now,del:Number(dl)?1:0};
+ }
+ const L={};for(const x of D)L[x.id]={...x,del:0};for(const id in T)if(!L[id])L[id]={id,ts:T[id],del:1};
+ const F={};
+ for(const id of new Set([...Object.keys(L),...Object.keys(R)])){
+  const l=L[id],r=R[id];
+  if(!r)F[id]=l.del?null:l;
+  else if(!l)F[id]=r.ts?r:{...r,ts:now};
+  else if(r.ts>l.ts)F[id]=r;
+  else if(l.ts>r.ts)F[id]=l.del?{...r,del:1,ts:l.ts}:l;
+  else F[id]=same(l,r)?r:{...r,ts:now};
+ }
+ const all=Object.values(F).filter(Boolean).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.ts-b.ts);
+ const out=[['id','date','category','amount','comment','updated','deleted'],...all.map(f=>[f.id,f.date,f.cat,f.amt,f.note,f.ts,f.del?1:'']),...junk];
+ await api(tok,rg('A1')+'?valueInputOption=RAW','PUT',{values:out});
+ await api(tok,rg('A'+(out.length+1)+':G')+':clear','POST',{});
+ D=[];T={};
+ for(const f of all){if(f.del)T[f.id]=f.ts;else D.push({id:f.id,date:f.date,cat:f.cat,amt:f.amt,note:f.note,ts:f.ts})}
+ persist();return D.length;
+}
+let busy=false;
+async function runSync(){
+ const say=s=>{const el=$('#ss');if(el)el.textContent=s};
+ if(busy)return;if(!SID||!SA)return say('Enter the sheet ID and key first.');
+ busy=true;say('Syncing...');const before=JSON.stringify(D);
+ try{const c=await sync();SS='Last sync '+new Date().toLocaleString()+', '+c+' expenses';ls.set('tet.last',SS);say(SS);
+  if(JSON.stringify(D)!=before&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName))render()}
+ catch(e){say('Sync failed: '+e.message)}
+ busy=false;
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)runSync()});
+render();runSync();
